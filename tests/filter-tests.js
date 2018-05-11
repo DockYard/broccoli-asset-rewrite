@@ -15,7 +15,7 @@ function confirmOutput(actualPath, expectedPath) {
   assert.deepEqual(actualFiles, expectedFiles, 'files output should be the same as those input');
 
   expectedFiles.forEach((relativePath) => {
-    if (relativePath.slice(-1) === '/') { return; }
+    if (relativePath.endsWith('/')) { return; }
 
     let actual   = fs.readFileSync(path.join(actualPath, relativePath), { encoding: 'utf8'});
     let expected = fs.readFileSync(path.join(expectedPath, relativePath), { encoding: 'utf8' });
