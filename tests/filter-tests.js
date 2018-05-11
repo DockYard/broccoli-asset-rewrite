@@ -33,7 +33,7 @@ describe('broccoli-asset-rev', function() {
 
   it('uses the provided assetMap to replace strings', function(){
     var sourcePath = 'tests/fixtures/basic';
-    var node = AssetRewrite(sourcePath + '/input', {
+    var node = new AssetRewrite(sourcePath + '/input', {
       assetMap: {
         'foo/bar/widget.js': 'blahzorz-1.js',
         'images/sample.png': 'images/fingerprinted-sample.png',
@@ -236,7 +236,7 @@ describe('broccoli-asset-rev', function() {
 
   it('replaces assets in srcset attributes', function(){
     var sourcePath = 'tests/fixtures/srcset';
-    var node = AssetRewrite(sourcePath + '/input', {
+    var node = new AssetRewrite(sourcePath + '/input', {
       assetMap: {
         '/assets/img/small.png': '/assets/img/other-small.png',
         '/assets/img/medium.png': '/assets/img/other-medium.png',
@@ -252,7 +252,7 @@ describe('broccoli-asset-rev', function() {
 
   it('replaces assets in srcset attributes with prepend option', function(){
     var sourcePath = 'tests/fixtures/srcset-prepend';
-    var node = AssetRewrite(sourcePath + '/input', {
+    var node = new AssetRewrite(sourcePath + '/input', {
       assetMap: {
         '/assets/img/small.png': '/assets/img/other-small.png',
         '/assets/img/medium.png': '/assets/img/other-medium.png',

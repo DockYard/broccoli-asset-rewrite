@@ -1,6 +1,15 @@
-var Filter = require('broccoli-filter');
-var path = require('path');
-var Cache = require('broccoli-filter/lib/cache');
+const Filter = require('broccoli-filter');
+const path = require('path');
+const Cache = require('broccoli-filter/lib/cache');
+
+const REMOVE_LEADING_RELATIVE_OR_SLASH_REGEX = new RegExp('^(\\.*/)*(.*)$');
+
+/*
+ * /([.*+?^=!:${}()|\[\]\/\\])/g - Replace .*+?^=!:${}()|[]/\ in filenames with an escaped version for an exact name match
+ */
+function escapeRegExp(string) {
+  return string.replace(/([.*+?^${}()|\[\]\/\\])/g, "\\$1");
+}
 
 function normalize(str) {
   return str.replace(/[\\\/]+/g, '/');
@@ -11,17 +20,17 @@ function relative(a, b) {
     a = path.dirname(a);
   }
 
-  var relativePath = path.relative(a, b);
+  let relativePath = path.relative(a, b);
   // path.relative might have added back \-s on windows
   relativePath = normalize(relativePath);
-  return relativePath.charAt(0) !== '.' ? './' + relativePath : relativePath;
+  return relativePath.startsWith('.') ? relativePath : `./${relativePath}`;
 }
 
 /*
  * Checks if there is already a prepend in the current match.
  */
-function alreadyHasPrepend(string, prepend, offset, submatch) {
-  var startIndex = offset + (submatch || "").length - prepend.length;
+function alreadyHasPrepend(string, prepend, offset, submatch='') {
+  let startIndex = offset + submatch.length - prepend.length;
 
   // Can be a problem if startIndex is -1 and there is no
   // prepend in string.
@@ -41,10 +50,9 @@ function alreadyHasPrepend(string, prepend, offset, submatch) {
  * @param {String} prepend an string to prepend the replacement with.
  */
 function replacer(replacement, prepend) {
-  var removeLeadingRelativeOrSlashRegex = new RegExp('^(\\.*/)*(.*)$');
-  return function(match, submatch) {
-    var offset = arguments[arguments.length - 2];
-    var string = arguments[arguments.length - 1];
+  return (match, submatch, ...args) => {
+    let offset = args[args.length - 2];
+    let string = args[args.length - 1];
 
     if (alreadyHasPrepend(string, prepend, offset, submatch)) {
       return submatch + replacement;
@@ -52,189 +60,166 @@ function replacer(replacement, prepend) {
 
     // submatch would have been removed by removeLeadingRelativeOrSlashRegex,
     // so no need to concat.
-    return prepend + removeLeadingRelativeOrSlashRegex.exec(replacement)[2];
+    return prepend + REMOVE_LEADING_RELATIVE_OR_SLASH_REGEX.exec(replacement)[2];
   }
 }
+class AssetRewrite extends Filter {
 
-function AssetRewrite(inputNode, options) {
-  if (!(this instanceof AssetRewrite)) {
-    return new AssetRewrite(inputNode, options);
+  constructor(inputNode, options = {}) {
+    super(inputNode, {
+      extensions: options.replaceExtensions || ['html', 'css'],
+      // We should drop support for `description` in the next major release
+      annotation: options.description || options.annotation
+    })
+
+    this.assetMap = options.assetMap || {};
+    this.prepend = options.prepend || '';
+    this.ignore = options.ignore || []; // files to ignore
+
+    this.assetMapKeys = null;
   }
 
-  options = options || {};
-
-  Filter.call(this, inputNode, {
-    extensions: options.replaceExtensions || ['html', 'css'],
-    // We should drop support for `description` in the next major release
-    annotation: options.description || options.annotation
-  });
-
-  this.assetMap = options.assetMap || {};
-  this.prepend = options.prepend || '';
-  this.ignore = options.ignore || []; // files to ignore
-
-  this.assetMapKeys = null;
-}
-
-AssetRewrite.prototype = Object.create(Filter.prototype);
-AssetRewrite.prototype.constructor = AssetRewrite;
-
-AssetRewrite.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) {
-  this._cache = new Cache();
-
-  return Filter.prototype.processAndCacheFile.apply(this, arguments);
-}
-
-/**
- * Checks that file is not being ignored and destination doesn't already have a file
- * @param relativePath
- * @returns {boolean}
- */
-
-AssetRewrite.prototype.canProcessFile = function(relativePath) {
-  if (!this.assetMapKeys) {
-    this.generateAssetMapKeys();
-  }
-
-  if (!this.inverseAssetMap) {
-    var inverseAssetMap = {};
-    var assetMap = this.assetMap;
-
-    Object.keys(assetMap).forEach(function(key) {
-      var value = assetMap[key];
-      inverseAssetMap[value] = key;
-    }, this);
-
-    this.inverseAssetMap = inverseAssetMap;
-  }
-
-  /*
-   * relativePath can be fingerprinted or not.
-   * Check that neither of these variations are being ignored
+  /**
+   * Checks that file is not being ignored and destination doesn't already have a file
+   * 
+   * @method canProcessFile
+   * @param {String} relativePath
+   * @returns {Boolean}
    */
-
-  if (this.ignore.indexOf(relativePath) !== -1 || this.ignore.indexOf(this.inverseAssetMap[relativePath]) !== -1) {
-    return false;
-  }
-
-  return Filter.prototype.canProcessFile.apply(this, arguments);
-}
-
-AssetRewrite.prototype.rewriteAssetPath = function (string, assetPath, replacementPath) {
-
-  // Early exit: does the file contain the asset path?
-  if (string.indexOf(assetPath) === -1) return string;
-
-  var newString = string;
-
-  /*
-   * Replace all of the assets with their new fingerprint name
-   *
-   * Uses a regular expression to find assets in html tags, css backgrounds, handlebars pre-compiled templates, etc.
-   *
-   * ["\'(=] - Match one of "'(= exactly one time
-   * \\s* - Any amount of white space
-   * ( - Starts the first capture group
-   * [^"\'()=]* - Do not match any of ^"'()= 0 or more times
-   * [^"\'()\\>=]* - Do not match any of ^"'()\>= 0 or more times - Explicitly add \ here because of handlebars compilation
-   * ) - End first capture group
-   * (\\?[^"\')> ]*)? - Allow for query parameters to be present after the URL of an asset
-   * \\s* - Any amount of white space
-   * \\\\* - Allow any amount of \ - For handlebars compilation (includes \\\)
-   * \\s* - Any amount of white space
-   * ["\')> ] - Match one of "'( > exactly one time
-   */
-
-  var re = new RegExp('["\'(=]\\s*([^"\'()=]*' + escapeRegExp(assetPath) + '[^"\'()\\>=]*)(\\?[^"\')> ]*)?\\s*\\\\*\\s*["\')> ]', 'g');
-  var match = null;
-  /*
-   * This is to ignore matches that should not be changed
-   * Any URL encoded match that would be ignored above will be ignored by this: "'()=\
-   */
-  var ignoreLibraryCode = new RegExp('%(22|27|5C|28|29|3D)[^"\'()=]*' + escapeRegExp(assetPath));
-
-  while (match = re.exec(newString)) {
-    var replaceString = '';
-    if (ignoreLibraryCode.exec(match[1])) {
-      continue;
+  canProcessFile(relativePath) {
+    if (!this.assetMapKeys) {
+      this.generateAssetMapKeys();
     }
 
-    var replaceString;
-
-    if (this.prepend) {
-      replaceString = match[1].replace(new RegExp('(\\.*/)*' + assetPath, 'g'),
-                                       replacer(replacementPath, this.prepend));
-    } else {
-      replaceString = match[1].replace(new RegExp(assetPath, 'g'), replacementPath);
+    if (!this.inverseAssetMap) {
+      this.inverseAssetMap = Object.create(null);
+      Object.keys(this.assetMap).forEach((key) => {
+        let value = this.assetMap[key];
+        this.inverseAssetMap[value] = key;
+      });
     }
 
-    newString = newString.replace(new RegExp(escapeRegExp(match[1]), 'g'), replaceString);
+    /*
+    * relativePath can be fingerprinted or not.
+    * Check that neither of these variations are being ignored
+    */
+    
+    if (this.ignore.includes(relativePath) || this.ignore.includes(this.inverseAssetMap[relativePath])) {
+      return false;
+    }
+
+    return super.canProcessFile(...arguments);
   }
 
-  var self = this;
-  return newString.replace(new RegExp('sourceMappingURL=' + escapeRegExp(assetPath)), function(wholeMatch) {
-    var replaceString = replacementPath;
-    if (self.prepend && (!/^sourceMappingURL=(http|https|\/\/)/.test(wholeMatch))) {
-      replaceString = self.prepend + replacementPath;
-    }
-    return wholeMatch.replace(assetPath, replaceString);
-  });
-};
-
-AssetRewrite.prototype.processString = function (string, relativePath) {
-  var newString = string;
-
-  for (var i = 0, keyLength = this.assetMapKeys.length; i < keyLength; i++) {
-    var key = this.assetMapKeys[i];
-
-    if (this.assetMap.hasOwnProperty(key)) {
-      /*
-       * Rewrite absolute URLs
-       */
-
-      newString = this.rewriteAssetPath(newString, key, this.assetMap[key]);
-
-      /*
-       * Rewrite relative URLs. If there is a prepend, use the full absolute path.
-       */
-
-      var pathDiff = relative(relativePath, key).replace(/^\.\//, "");
-      var replacementDiff = relative(relativePath, this.assetMap[key]).replace(/^\.\//, "");
-
-      if (this.prepend && this.prepend !== '') {
-        replacementDiff = this.assetMap[key];
+  generateAssetMapKeys() {
+    this.assetMapKeys = Object.keys(this.assetMap);
+  
+    this.assetMapKeys.sort((a, b) => {
+      if (a.length < b.length) {
+        return 1;
       }
 
-      newString = this.rewriteAssetPath(newString, pathDiff, replacementDiff);
-    }
+      if (a.length > b.length) {
+        return -1;
+      }
+
+      return 0;
+    });
   }
 
-  return newString;
-};
+  processAndCacheFile(srcDir, destDir, relativePath) {
+    this._cache = new Cache();
 
-AssetRewrite.prototype.generateAssetMapKeys = function () {
-  var keys = Object.keys(this.assetMap);
+    return super.processAndCacheFile(...arguments);
+  }
 
-  keys.sort(function (a, b) {
-    if (a.length < b.length) {
-      return 1;
+  processString(string, relativePath) {
+    let newString = string;
+
+    return this.assetMapKeys.reduce((memo, key) => {
+      if (this.assetMap.hasOwnProperty(key)) {
+        /*
+        * Rewrite absolute URLs
+        */
+
+        memo = this.rewriteAssetPath(memo, key, this.assetMap[key]);
+
+        /*
+        * Rewrite relative URLs. If there is a prepend, use the full absolute path.
+        */
+
+        let pathDiff = relative(relativePath, key).replace(/^\.\//, "");
+        let replacementDiff = relative(relativePath, this.assetMap[key]).replace(/^\.\//, "");
+
+        if (this.prepend && this.prepend !== '') {
+          replacementDiff = this.assetMap[key];
+        }
+
+        memo = this.rewriteAssetPath(memo, pathDiff, replacementDiff);
+      }
+      return memo;
+    }, string);
+  }
+
+  rewriteAssetPath(string, assetPath, replacementPath) {
+    // Early exit: does the file contain the asset path?
+    if (!string.includes(assetPath)) {
+      return string;
     }
 
-    if (a.length > b.length) {
-      return -1;
+    let newString = string;
+
+    /*
+    * Replace all of the assets with their new fingerprint name
+    *
+    * Uses a regular expression to find assets in html tags, css backgrounds, handlebars pre-compiled templates, etc.
+    *
+    * ["\'(=] - Match one of "'(= exactly one time
+    * \\s* - Any amount of white space
+    * ( - Starts the first capture group
+    * [^"\'()=]* - Do not match any of ^"'()= 0 or more times
+    * [^"\'()\\>=]* - Do not match any of ^"'()\>= 0 or more times - Explicitly add \ here because of handlebars compilation
+    * ) - End first capture group
+    * (\\?[^"\')> ]*)? - Allow for query parameters to be present after the URL of an asset
+    * \\s* - Any amount of white space
+    * \\\\* - Allow any amount of \ - For handlebars compilation (includes \\\)
+    * \\s* - Any amount of white space
+    * ["\')> ] - Match one of "'( > exactly one time
+    */
+    let re = new RegExp('["\'(=]\\s*([^"\'()=]*' + escapeRegExp(assetPath) + '[^"\'()\\>=]*)(\\?[^"\')> ]*)?\\s*\\\\*\\s*["\')> ]', 'g');
+    let match;
+
+    /*
+    * This is to ignore matches that should not be changed
+    * Any URL encoded match that would be ignored above will be ignored by this: "'()=\
+    */
+    let ignoreLibraryCode = new RegExp('%(22|27|5C|28|29|3D)[^"\'()=]*' + escapeRegExp(assetPath));
+
+    while(match = re.exec(newString)) {
+      let replaceString = '';
+      if (ignoreLibraryCode.exec(match[1])) {
+        continue;
+      }
+
+      if (this.prepend) {
+        replaceString = match[1].replace(new RegExp('(\\.*/)*' + assetPath, 'g'),
+          replacer(replacementPath, this.prepend));
+      } else {
+        replaceString = match[1].replace(new RegExp(assetPath, 'g'), replacementPath)
+      }
+
+
+      newString = newString.replace(new RegExp(escapeRegExp(match[1]), 'g'), replaceString);
     }
 
-    return 0;
-  });
-
-  this.assetMapKeys = keys;
-};
-
-/*
- * /([.*+?^=!:${}()|\[\]\/\\])/g - Replace .*+?^=!:${}()|[]/\ in filenames with an escaped version for an exact name match
- */
-function escapeRegExp(string) {
-  return string.replace(/([.*+?^${}()|\[\]\/\\])/g, "\\$1");
+    return newString.replace(new RegExp('sourceMappingURL=' + escapeRegExp(assetPath)), (wholeMatch) => {
+      let replaceString = replacementPath;
+      if (this.prepend && (!/^sourceMappingURL=(http|https|\/\/)/.test(wholeMatch))) {
+        replaceString = this.prepend + replacementPath;
+      }
+      return wholeMatch.replace(assetPath, replaceString);
+    });
+  }
 }
 
 module.exports = AssetRewrite;
