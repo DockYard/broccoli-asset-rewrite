@@ -2,7 +2,7 @@ const fs       = require('fs');
 const path     = require('path');
 const assert   = require('assert');
 const walkSync = require('walk-sync');
-const broccoli = require('broccoli');
+const { Builder } = require('broccoli');
 
 const AssetRewrite  = require('..');
 
@@ -48,7 +48,7 @@ describe('broccoli-asset-rev', () => {
       }
     });
 
-    builder = new broccoli.Builder(node);
+    builder = new Builder(node);
     return builder.build().then((graph) => {
       confirmOutput(graph.directory, `${sourcePath}/output`);
     });
@@ -64,7 +64,7 @@ describe('broccoli-asset-rev', () => {
       ignore: ['ignore-this-file.html']
     });
 
-    builder = new broccoli.Builder(node);
+    builder = new Builder(node);
     return builder.build().then((graph) => {
       confirmOutput(graph.directory, `${sourcePath}/output`);
     });
@@ -81,7 +81,7 @@ describe('broccoli-asset-rev', () => {
       }
     });
 
-    builder = new broccoli.Builder(node);
+    builder = new Builder(node);
     return builder.build().then((graph) => {
       confirmOutput(graph.directory, `${sourcePath}/output`);
     });
@@ -100,7 +100,7 @@ describe('broccoli-asset-rev', () => {
       prepend: 'https://cloudfront.net/'
     });
 
-    builder = new broccoli.Builder(node);
+    builder = new Builder(node);
     return builder.build().then((graph) => {
       confirmOutput(graph.directory, `${sourcePath}/output`);
     });
@@ -120,7 +120,7 @@ describe('broccoli-asset-rev', () => {
       }
     });
 
-    builder = new broccoli.Builder(node);
+    builder = new Builder(node);
     return builder.build().then((graph) => {
       confirmOutput(graph.directory, `${sourcePath}/output`);
     });
@@ -136,7 +136,7 @@ describe('broccoli-asset-rev', () => {
         'http://absolute.com/source.map' : 'http://cdn.absolute.com/other-map'
       }
     });
-    builder = new broccoli.Builder(node);
+    builder = new Builder(node);
     return builder.build().then((graph) => {
       confirmOutput(graph.directory, `${sourcePath}/output`);
     });
@@ -153,7 +153,7 @@ describe('broccoli-asset-rev', () => {
       },
       prepend: 'https://cloudfront.net/'
     });
-    builder = new broccoli.Builder(node);
+    builder = new Builder(node);
     return builder.build().then((graph) => {
       confirmOutput(graph.directory, `${sourcePath}/output`);
     });
@@ -167,7 +167,7 @@ describe('broccoli-asset-rev', () => {
       }
     });
 
-    builder = new broccoli.Builder(node);
+    builder = new Builder(node);
     return builder.build().then((graph) => {
       confirmOutput(graph.directory, `${sourcePath}/output`);
     });
@@ -182,7 +182,7 @@ describe('broccoli-asset-rev', () => {
       prepend: 'https://cloudfront.net/'
     });
 
-    builder = new broccoli.Builder(node);
+    builder = new Builder(node);
     return builder.build().then((graph) => {
       confirmOutput(graph.directory, `${sourcePath}/output`);
     });
@@ -198,7 +198,7 @@ describe('broccoli-asset-rev', () => {
       prepend: 'https://cloudfront.net/'
     });
 
-    builder = new broccoli.Builder(node);
+    builder = new Builder(node);
     return builder.build().then((graph) => {
       confirmOutput(graph.directory, `${sourcePath}/output`);
     });
@@ -213,7 +213,7 @@ describe('broccoli-asset-rev', () => {
       },
     });
 
-    builder = new broccoli.Builder(node);
+    builder = new Builder(node);
     return builder.build().then((graph) => {
       confirmOutput(graph.directory, `${sourcePath}/output`);
     });
@@ -228,7 +228,7 @@ describe('broccoli-asset-rev', () => {
       replaceExtensions: ['js'],
     });
 
-    builder = new broccoli.Builder(node);
+    builder = new Builder(node);
     return builder.build().then((graph) => {
       confirmOutput(graph.directory, `${sourcePath}/output`);
     })
@@ -244,7 +244,7 @@ describe('broccoli-asset-rev', () => {
       }
     });
 
-    builder = new broccoli.Builder(node);
+    builder = new Builder(node);
     return builder.build().then(function(graph) {
       confirmOutput(graph.directory, sourcePath + '/output');
     });
@@ -261,7 +261,7 @@ describe('broccoli-asset-rev', () => {
       prepend: 'https://subdomain.cloudfront.net/'
     });
 
-    builder = new broccoli.Builder(node);
+    builder = new Builder(node);
     return builder.build().then(function(graph) {
       confirmOutput(graph.directory, sourcePath + '/output');
     });
